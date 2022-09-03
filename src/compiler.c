@@ -42,6 +42,7 @@ typedef struct {
 typedef struct {
   Token name;
   int depth;
+  bool isCaptured;
 } Local;
 
 typedef struct {
@@ -58,7 +59,7 @@ typedef struct Compiler {
   struct Compiler* enclosing;
   ObjFunction* function;
   FunctionType type;
-  
+
   Local locals[UINT8_COUNT];
   int localCount;
   Upvalue upvalues[UINT8_COUNT];
@@ -196,9 +197,10 @@ static void initCompiler(Compiler* compiler, FunctionType type) {
   if (type != TYPE_SCRIPT) {
     current->function->name = copyString(parser.previous.start, parser.previous.length);
   }
-  
+
   Local* local = &current->locals[current->localCount++];
   local->depth = 0;
+  local->isCaptured = false;
   local->name.start = "";
   local->name.length = 0;
 }
@@ -227,7 +229,11 @@ static void endScope() {
   while (current->localCount > 0 &&
          current->locals[current->localCount - 1].depth >
          current->scopeDepth) {
-    emitByte(OP_POP);
+    if (current->locals[current->localCount - 1].isCaptured) {
+      emitByte(OP_CLOSE_UPVALUE);
+    } else {
+      emitByte(OP_POP);
+    }
     current->localCount--;
   }
 }
@@ -286,6 +292,7 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
 
   int local = resolveLocal(compiler->enclosing, name);
   if (local != -1) {
+    compiler->enclosing->locals[local].isCaptured = true;
     return addUpvalue(compiler, (uint8_t)local, true);
   }
 
@@ -302,10 +309,11 @@ static void addLocal(Token name) {
     error("Too many local variables in function.");
     return;
   }
-  
+
   Local* local = &current->locals[current->localCount++];
   local->name = name;
   local->depth = -1;
+  local->isCaptured = false;
 }
 
 static void declareVariable() {
@@ -322,7 +330,7 @@ static void declareVariable() {
       error("Already a variable with this name in this scope.");
     }
   }
-  
+
   addLocal(*name);
 }
 
@@ -331,7 +339,7 @@ static uint8_t parseVariable(const char* errorMessage) {
 
   declareVariable();
   if (current->scopeDepth > 0) return 0;
-  
+
   return identifierConstant(&parser.previous);
 }
 
@@ -345,7 +353,7 @@ static void defineVariable(uint8_t global) {
     markInitialized();
     return;
   }
-  
+
   emitBytes(OP_DEFINE_GLOBAL, global);
 }
 
@@ -448,7 +456,7 @@ static void namedVariable(Token name, bool canAssign) {
     getOp = OP_GET_GLOBAL;
     setOp = OP_SET_GLOBAL;
   }
-  
+
 
   if (canAssign && match(TOKEN_EQUAL)) {
     expression();
@@ -607,7 +615,7 @@ static void forStatement() {
     exitJump = emitJump(OP_JUMP_IF_FALSE);
     emitByte(OP_POP); // Condition.
   }
-  
+
   if (!match(TOKEN_RIGHT_PAREN)) {
     int bodyJump = emitJump(OP_JUMP);
     int incrementStart = currentChunk()->count;
@@ -627,7 +635,7 @@ static void forStatement() {
     patchJump(exitJump);
     emitByte(OP_POP);
   }
-  
+
   endScope();
 }
 
@@ -659,7 +667,7 @@ static void returnStatement() {
   if (current->type == TYPE_SCRIPT) {
     error("Can't return from top-level code.");
   }
-  
+
   if (match(TOKEN_SEMICOLON)) {
     emitReturn();
   } else {
