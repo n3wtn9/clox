@@ -40,7 +40,7 @@ static void runtimeError(const char* format, ...) {
       fprintf(stderr, "%s()\n", function->name->chars);
     }
   }
-  
+
   resetStack();
 }
 
@@ -98,7 +98,7 @@ static bool call(ObjClosure* closure, int argCount) {
     runtimeError("Stack overflow.");
     return false;
   }
-  
+
   CallFrame* frame = &vm.frames[vm.frameCount++];
   frame->closure = closure;
   frame->ip = closure->function->chunk.code;
@@ -142,7 +142,7 @@ static ObjUpvalue* captureUpvalue(Value* local) {
   if (upvalue != NULL && upvalue->location == local) {
     return upvalue;
   }
-  
+
   ObjUpvalue* createUpvalue = newUpvalue(local);
   createUpvalue->next = upvalue;
 
@@ -151,7 +151,7 @@ static ObjUpvalue* captureUpvalue(Value* local) {
   } else {
     preUpvalue->next = createUpvalue;
   }
-  
+
   return createUpvalue;
 }
 
@@ -162,6 +162,13 @@ static void closeUpvalues(Value* last) {
     upvalue->location = &upvalue->closed;
     vm.openUpvalues = upvalue->next;
   }
+}
+
+static void defineMethod(ObjString* name) {
+  Value method = peek(0);
+  ObjClass* klass = AS_CLASS(peek(1));
+  tableSet(&klass->methods, name, method);
+  pop();
 }
 
 static bool isFalsey(Value value) {
@@ -186,26 +193,26 @@ static void concatinate() {
 
 static InterpretResult run() {
   CallFrame* frame = &vm.frames[vm.frameCount - 1];
-  
+
 #define READ_BYTE() (*frame->ip++)
 
-#define READ_SHORT() \
-  (frame->ip += 2, \
-  (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+#define READ_SHORT()                                  \
+  (frame->ip += 2,                                    \
+   (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
 
-#define READ_CONSTANT() \
+#define READ_CONSTANT()                                           \
   (frame->closure->function->chunk.constants.values[READ_BYTE()])
-  
+
 #define READ_STRING() AS_STRING(READ_CONSTANT())
-#define BINARY_OP(valueType, op) \
-  do { \
+#define BINARY_OP(valueType, op)                      \
+  do {                                                \
     if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
-      runtimeError("Operands must be numbers."); \
-      return INTERPRET_RUNTIME_ERROR; \
-    } \
-    double b = AS_NUMBER(pop()); \
-    double a = AS_NUMBER(pop()); \
-    push(valueType(a op b)); \
+      runtimeError("Operands must be numbers.");      \
+      return INTERPRET_RUNTIME_ERROR;                 \
+    }                                                 \
+    double b = AS_NUMBER(pop());                      \
+    double a = AS_NUMBER(pop());                      \
+    push(valueType(a op b));                          \
   } while (false)
 
   for (;;) {
@@ -216,12 +223,12 @@ static InterpretResult run() {
       printValue(*slot);
       printf(" ]");
     }
-    printf("\n"); 
+    printf("\n");
     disassembleInstruction(&frame->closure->function->chunk,
                            (int)(frame->ip - frame->closure->function->chunk.code));
-                           
+
 #endif
-    
+
     uint8_t instruction;
     switch (instruction = READ_BYTE()) {
     case OP_CONSTANT: {
@@ -408,14 +415,17 @@ static InterpretResult run() {
     case OP_CLASS:
       push(OBJ_VAL(newClass(READ_STRING())));
       break;
+    case OP_METHOD:
+      defineMethod(READ_STRING());
+      break;
     }
   }
 
-  #undef READ_BYTE
-  #undef READ_SHORT
-  #undef READ_CONSTANT
-  #undef READ_STRING
-  #undef BINARY_OP
+#undef READ_BYTE
+#undef READ_SHORT
+#undef READ_CONSTANT
+#undef READ_STRING
+#undef BINARY_OP
 }
 
 InterpretResult interpret(const char* source) {
@@ -427,6 +437,6 @@ InterpretResult interpret(const char* source) {
   pop();
   push(OBJ_VAL(closure));
   call(closure, 0);
-  
+
   return run();
 }
